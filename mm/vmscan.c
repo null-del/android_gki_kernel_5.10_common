@@ -1962,18 +1962,9 @@ static unsigned noinline_for_stack move_pages_to_lru(struct lruvec *lruvec,
 		 *                                        list_add(&page->lru,)
 		 */
 		SetPageLRU(page);
-<<<<<<< HEAD
-		add_page_to_lru_list(page, lruvec);
 
 		if (put_page_testzero(page)) {
-			del_page_from_lru_list(page, lruvec);
 			__clear_page_lru_flags(page);
-=======
-
-		if (unlikely(put_page_testzero(page))) {
-			__ClearPageLRU(page);
-			__ClearPageActive(page);
->>>>>>> a3c2d7edce44 (mm/vmscan: remove unnecessary lruvec adding)
 
 			if (unlikely(PageCompound(page))) {
 				spin_unlock_irq(&pgdat->lru_lock);
@@ -1981,16 +1972,8 @@ static unsigned noinline_for_stack move_pages_to_lru(struct lruvec *lruvec,
 				spin_lock_irq(&pgdat->lru_lock);
 			} else
 				list_add(&page->lru, &pages_to_free);
-<<<<<<< HEAD
-		} else {
-			nr_pages = thp_nr_pages(page);
-			nr_moved += nr_pages;
-			if (PageActive(page))
-				workingset_age_nonresident(lruvec, nr_pages);
-=======
 
 			continue;
->>>>>>> a3c2d7edce44 (mm/vmscan: remove unnecessary lruvec adding)
 		}
 
 		/*
