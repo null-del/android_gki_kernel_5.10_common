@@ -125,6 +125,14 @@ KBUILD_LDFLAGS	+= -EL $(call ld-option, -maarch64elf, -maarch64linux -z norelro)
 UTS_MACHINE	:= aarch64
 endif
 
+ifeq ($(cc-name),clang)
+KBUILD_CFLAGS   += -mcpu=cortex-x2
+KBUILD_AFLAGS   += -mcpu=cortex-x2
+ifeq ($(CONFIG_LD_IS_LLD), y)
+KBUILD_LDFLAGS  += -mllvm -mcpu=cortex-x2
+endif
+endif
+
 ifeq ($(CONFIG_LD_IS_LLD), y)
 KBUILD_LDFLAGS	+= -z norelro
 endif
