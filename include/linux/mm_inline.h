@@ -332,6 +332,7 @@ static __always_inline void add_page_to_lru_list_tail(struct page *page,
 static __always_inline void del_page_from_lru_list(struct page *page,
 				struct lruvec *lruvec)
 {
+	enum lru_list lru = page_lru(page);
 	trace_android_vh_del_page_from_lrulist(page, false, lru);
 	if (lru_gen_del_page(lruvec, page, false))
 		return;
