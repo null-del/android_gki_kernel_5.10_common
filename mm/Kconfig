@@ -896,6 +896,12 @@ config ARCH_HAS_HUGEPD
 config MAPPING_DIRTY_HELPERS
         bool
 
+config KSHRINK_SLABD
+	tristate "memload optimization"
+	default y
+	help
+	  define this config to add oplus memload optimization feature
+
 source "mm/damon/Kconfig"
 
 endmenu
