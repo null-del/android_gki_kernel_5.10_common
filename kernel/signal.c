@@ -3676,6 +3676,60 @@ static inline void prepare_kill_siginfo(int sig, struct kernel_siginfo *info)
 	info->si_uid = from_kuid_munged(current_user_ns(), current_uid());
 }
 
+inline void sigkill_filter(struct task_struct *t, struct kernel_siginfo *info,
+			   pid_t pid, _Bool ignored)
+{
+	static const char *target = "SystemPressureC";
+	struct task_struct *pid_task;
+	struct pid *pid_struct;
+	int sig;
+	char buffer[256] = { 0 };
+
+	sig = info->si_signo;
+	if (pid < 0)
+		pid = -pid;
+
+	if (sig != SIGKILL && sig != SIGTERM) {
+		pr_err("return sig != SIGKILL && sig != SIGTERM");
+		return;
+	}
+
+	pid_struct = find_get_pid(pid);
+	if (!pid_struct) {
+		pr_err("return !pid_struct");
+		put_pid(pid_struct);
+		return;
+	}
+
+	pid_task = get_pid_task(pid_struct, PIDTYPE_PID);
+	if (!pid_task) {
+		pr_err("return !pid_task");
+		put_task_struct(pid_task);
+		return;
+	}
+
+	memset(buffer, 0, sizeof(buffer));
+	get_cmdline(current, buffer, sizeof(buffer));
+	pr_err("strcmp target");
+	if (strcmp(buffer, target) == 0) {
+		ignored = true;
+		pr_err("Blocking \"%s\"(%d) send signal %d to "
+			"\"%s\"(%d)\n",
+			current->comm, info->si_pid, sig, pid_task->comm, pid);
+		goto out;
+	} else {
+		pr_err("Allow \"%s\"(%d) send signal %d to "
+			"\"%s\"(%d)\n",
+			current->comm, info->si_pid, sig, pid_task->comm, pid);
+		goto out;
+	}
+
+out:
+	put_pid(pid_struct);
+	put_task_struct(pid_task);
+	return;
+}
+
 /**
  *  sys_kill - send a signal to a process
  *  @pid: the PID of the process
@@ -3683,7 +3737,15 @@ static inline void prepare_kill_siginfo(int sig, struct kernel_siginfo *info)
  */
 SYSCALL_DEFINE2(kill, pid_t, pid, int, sig)
 {
-	struct kernel_siginfo info;
+	struct kernel_siginfo info; 
+	_Bool ignored = false;
+	pr_err("ignored1 %d\n",ignored);
+    
+	sigkill_filter(current, &info, pid, ignored);
+	if (ignored) {
+		pr_err("ignored2 %d\n", ignored);
+		return -EPERM;
+	}
 
 	prepare_kill_siginfo(sig, &info);
 
