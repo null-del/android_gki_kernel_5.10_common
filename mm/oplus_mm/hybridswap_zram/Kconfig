@@ -76,4 +76,4 @@ config HYBRIDSWAP_CORE
 
 config ZRAM_DEFAULT_COMP_ALGORITHM
 	string "Default ZRAM algorithm"
-	default "zstd"
+	default "lz4"
