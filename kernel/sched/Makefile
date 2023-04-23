@@ -36,3 +36,6 @@ obj-$(CONFIG_CPU_FREQ_GOV_SCHEDUTIL) += cpufreq_schedutil.o
 obj-$(CONFIG_MEMBARRIER) += membarrier.o
 obj-$(CONFIG_CPU_ISOLATION) += isolation.o
 obj-$(CONFIG_PSI) += psi.o
+obj-$(CONFIG_OPLUS_FEATURE_SUGOV_POWER_EFFIENCY) += cpufreq_effiency/
+obj-$(CONFIG_OPLUS_UAG_AMU_AWARE) += stall_util_cal.o
+obj-$(CONFIG_UAG_NONLINEAR_FREQ_CTL) += nonlinear_opp_cap.o
