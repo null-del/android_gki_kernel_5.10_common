@@ -15,19 +15,19 @@ config OPLUS_FEATURE_ZRAM_OPT
 
 config KSHRINK_SLABD
 	tristate "memload optimization"
-	default y
+	default n
 	help
 	  define this config to add oplus memload optimization feature
 
 config PCPPAGES_OPT
 	tristate "pcppages_opt"
-	default y
+	default n
 	help
 	  pcppages_opt
 
 config MAPPED_PROTECT
 	tristate "mapped_protect"
-	default y
+	default n
 	help
 	  mapped_protect
 
