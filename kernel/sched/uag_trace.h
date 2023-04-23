@@ -11,49 +11,6 @@
 #include <linux/types.h>
 #include <linux/tracepoint.h>
 
-#ifdef CONFIG_OPLUS_UAG_USE_TL
-TRACE_EVENT(uag_next_util_tl,
-	TP_PROTO(unsigned int cpu, unsigned long util, unsigned long max,
-		unsigned int target_util),
-	TP_ARGS(cpu, util, max, target_util),
-	TP_STRUCT__entry(
-		__field(unsigned int, cpu)
-		__field(unsigned long, util)
-		__field(unsigned long, max)
-		__field(unsigned int, target_util)),
-	TP_fast_assign(
-		__entry->cpu = cpu;
-		__entry->util = util;
-		__entry->max = max;
-		__entry->target_util = target_util;),
-	TP_printk("cpu=%u util=%lu max=%lu target_util=%u",
-		__entry->cpu,
-		__entry->util,
-		__entry->max,
-		__entry->target_util)
-);
-
-TRACE_EVENT(uag_next_freq_info,
-	    TP_PROTO(int cluster_id, unsigned long util, int opp,
-		     unsigned int next_freq),
-	    TP_ARGS(cluster_id, util, opp, next_freq),
-	    TP_STRUCT__entry(
-		    __field(int, cluster_id)
-		    __field(unsigned long, util)
-		    __field(int, opp)
-		    __field(unsigned int, next_freq)),
-	    TP_fast_assign(
-		    __entry->cluster_id = cluster_id;
-		    __entry->util = util;
-		    __entry->opp = opp;
-		    __entry->next_freq = next_freq;),
-	    TP_printk("cluster_id=%d util=%lu opp=%d next_freq=%u",
-		      __entry->cluster_id,
-		      __entry->util,
-		      __entry->opp,
-		      __entry->next_freq)
-);
-
 TRACE_EVENT(choose_util,
 	    TP_PROTO(unsigned int cpu, unsigned int util, unsigned int prevutil, unsigned int utilmax,
 		     unsigned int utilmin, unsigned int tl),
@@ -80,31 +37,6 @@ TRACE_EVENT(choose_util,
 			__entry->utilmin,
 			__entry->tl)
 );
-
-TRACE_EVENT(uag_next_freq_tl,
-	    TP_PROTO(unsigned int cpu, unsigned long raw_util, unsigned long raw_freq,
-		     unsigned long util, unsigned long next_freq),
-	    TP_ARGS(cpu, raw_util, raw_freq, util, next_freq),
-	    TP_STRUCT__entry(
-		    __field(unsigned int, cpu)
-		    __field(unsigned long, raw_util)
-		    __field(unsigned long, raw_freq)
-		    __field(unsigned long, util)
-		    __field(unsigned long, next_freq)),
-	    TP_fast_assign(
-		    __entry->cpu = cpu;
-		    __entry->raw_util = raw_util;
-		    __entry->raw_freq = raw_freq;
-		    __entry->util = util;
-		    __entry->next_freq = next_freq;),
-	    TP_printk("cpu=%u raw_util=%lu raw_freq=%lu util=%lu next_freq=%lu",
-		      __entry->cpu,
-		      __entry->raw_util,
-		      __entry->raw_freq,
-		      __entry->util,
-		      __entry->next_freq)
-);
-#endif
 
 #ifdef CONFIG_OPLUS_UAG_AMU_AWARE
 #include "stall_util_cal.h"
@@ -185,74 +117,7 @@ TRACE_EVENT(uag_amu_adjust_util,
 );
 #endif /* CONFIG_OPLUS_UAG_AMU_AWARE */
 
-#ifdef CONFIG_OPLUS_MULTI_LV_TL
 #include "cpufreq_schedutil.h"
-TRACE_EVENT(uag_choose_multi_util,
-	    TP_PROTO(struct uag_gov_policy *sg_policy, unsigned long target_util),
-	    TP_ARGS(sg_policy, target_util),
-	    TP_STRUCT__entry(
-		    __field(unsigned int, cpu)
-		    __field(unsigned long, sys_util)
-		    __field(unsigned long, fbg_util)
-		    __field(unsigned long, target_util)),
-	    TP_fast_assign(
-		    __entry->cpu = sg_policy->policy->cpu;
-		    __entry->target_util = target_util;
-		    __entry->sys_util = sg_policy->multi_util[UA_UTIL_SYS];
-		    __entry->fbg_util = sg_policy->multi_util[UA_UTIL_FBG];),
-	    TP_printk("cpu=%u target_util=%lu sys_util=%lu fbg_util=%lu",
-		      __entry->cpu,
-		      __entry->target_util,
-		      __entry->sys_util,
-		      __entry->fbg_util)
-);
-
-TRACE_EVENT(uag_select_multi_tl,
-	    TP_PROTO(struct uag_gov_policy *sg_policy, unsigned long util, unsigned int tl),
-	    TP_ARGS(sg_policy, util, tl),
-	    TP_STRUCT__entry(
-		    __field(unsigned int, cpu)
-		    __field(unsigned int, multi_util_type)
-		    __field(unsigned int, tl)
-		    __field(unsigned long, util)),
-	    TP_fast_assign(
-		    __entry->cpu = sg_policy->policy->cpu;
-		    __entry->multi_util_type = sg_policy->multi_util_type;
-		    __entry->util = util;
-		    __entry->tl = tl;),
-	    TP_printk("cpu=%u multi_util_type=%u util=%lu tl=%u",
-		      __entry->cpu,
-		      __entry->multi_util_type,
-		      __entry->util,
-		      __entry->tl)
-);
-#endif
-
-TRACE_EVENT(ed_task_boost,
-
-	    TP_PROTO(unsigned long cpu_util, unsigned long util, unsigned int ed_task_boost_type,
-	             unsigned int ed_task_boost_mid_util, unsigned int ed_task_boost_max_util),
-
-	    TP_ARGS(cpu_util, util, ed_task_boost_type, ed_task_boost_mid_util, ed_task_boost_max_util),
-
-	    TP_STRUCT__entry(
-			__field(unsigned long, cpu_util)
-			__field(unsigned long, util)
-			__field(unsigned int, ed_task_boost_type)
-			__field(unsigned int, ed_task_boost_mid_util)
-			__field(unsigned int, ed_task_boost_max_util)),
-
-	    TP_fast_assign(
-			__entry->cpu_util = cpu_util;
-			__entry->util = util;
-			__entry->ed_task_boost_type = ed_task_boost_type;
-			__entry->ed_task_boost_mid_util = ed_task_boost_mid_util;
-			__entry->ed_task_boost_max_util = ed_task_boost_max_util;),
-
-	    TP_printk("cpu_util = %lu, util = %lu, ed_task_boost_type = %d, mid_util = %d, max_util = %d",
-			__entry->cpu_util, __entry->util, __entry->ed_task_boost_type,
-			__entry->ed_task_boost_mid_util, __entry->ed_task_boost_max_util)
-);
 #endif /* _TRACE_UAG_H */
 
 #undef TRACE_INCLUDE_PATH

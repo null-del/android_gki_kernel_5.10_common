@@ -289,6 +289,17 @@ static void free_capacity_table(void)
 	pd_capacity_tbl = NULL;
 }
 
+unsigned long cluster2_cap[21] = {1024, 962, 937, 906, 869, 832, 795, 758, 721, 684,
+				  641, 604, 567, 530, 493, 450, 413, 376, 333, 296,
+				  252};
+
+unsigned long cluster1_cap[20] = {832, 802, 779, 744,
+				  709, 674, 640, 605, 570, 535, 500, 471, 436, 401,
+				  366, 337, 302, 267, 232, 192};
+
+unsigned long cluster0_cap[16] = {277, 263, 247, 229, 213, 197, 182, 168, 155,
+				  145, 129, 110, 94, 76, 60, 41};
+				  
 static int init_capacity_table(void)
 {
 	int i, j, cpu;
@@ -301,12 +312,6 @@ static int init_capacity_table(void)
 	unsigned long *c_cap;
 
 	for (i = 0; i < pd_count; i++) {
-		struct cpufreq_frequency_table *pos;
-		struct cpufreq_policy *policy;
-		int idx;
-		unsigned long max;
-		unsigned int *freq;
-
 		pd_info = &pd_capacity_tbl[i];
 		cpu = cpumask_first(&pd_info->cpus);
 		pd = em_cpu_get(cpu);
@@ -314,31 +319,23 @@ static int init_capacity_table(void)
 		if (!pd)
 			goto err;
 
-		c_cap = kcalloc(pd_info->nr_caps, sizeof(unsigned long),
-							GFP_KERNEL);
-		freq = kcalloc(pd_info->nr_caps, sizeof(unsigned int),
-							GFP_KERNEL);
-
-		policy = cpufreq_cpu_get(cpu);
-		if (!policy)
+		if (i == 0) {
+			c_cap = cluster0_cap;
+		} else if (i == 1) {
+			c_cap = cluster1_cap;
+		} else if (i == 2) {
+			c_cap = cluster2_cap;
+		} else {
+			pr_info("capacity table init failed with i = %d, pd_count = %d\n", i, pd_count);
 			goto err;
+		}
 
-		max = arch_scale_cpu_capacity(cpu);
-
-		cpufreq_for_each_valid_entry_idx(pos, policy->freq_table, idx)
-			freq[idx] = pos->frequency;
-
-		cpufreq_cpu_put(policy);
-
-		for (j = 0; j < pd_info->nr_caps; j++)
-			c_cap[j] = mult_frac(freq[j], max, freq[pd_info->nr_caps - 1]);
-
-		for (j = pd_info->nr_caps-1; j >= 0; j--) {
+		for (j = 0; j < pd_info->nr_caps; j++) {
 			cap = c_cap[j];
-			if (j == 0) {
+			if (j == pd_info->nr_caps - 1) {
 				next_cap = -1;
 			} else {
-				next_cap = c_cap[j - 1];
+				next_cap = c_cap[j + 1];
 			}
 
 			if (cap == 0 || next_cap == 0)
@@ -364,20 +361,20 @@ static int init_capacity_table(void)
 			for (k = cap; k > next_cap; k--) {
 				pd_info->util_opp[k] = j;
 				pd_info->util_freq[k] =
-					pd->table[j].frequency;
+					pd->table[pd->nr_perf_states - j - 1].frequency;
 			}
 
 			count += 1;
 		}
-		end_cap = c_cap[j+1];
+		end_cap = c_cap[j-1];
 		if (end_cap != cap)
 			goto err;
 
 		for_each_cpu(j, &pd_info->cpus) {
-			if (per_cpu(cpu_scale, j) != pd_info->caps[pd_info->nr_caps - 1]) {
-				pr_info("per_cpu(cpu_scale, %d)=%d, pd_info->caps[pd_info->nr_caps - 1]=%d\n",
-					j, per_cpu(cpu_scale, j), pd_info->caps[pd_info->nr_caps - 1]);
-				per_cpu(cpu_scale, j) = pd_info->caps[pd_info->nr_caps - 1];
+			if (per_cpu(cpu_scale, j) != pd_info->caps[0]) {
+				pr_info("per_cpu(cpu_scale, %d)=%d, pd_info->caps[0]=%d\n",
+					j, per_cpu(cpu_scale, j), pd_info->caps[0]);
+				per_cpu(cpu_scale, j) = pd_info->caps[0];
 			}
 		}
 	}

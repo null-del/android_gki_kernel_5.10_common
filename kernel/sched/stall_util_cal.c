@@ -12,7 +12,6 @@
 
 #include <trace/events/sched.h>
 
-#include "cpufreq_schedutil.h"
 #include "stall_util_cal.h"
 
 #define CREATE_TRACE_POINTS
