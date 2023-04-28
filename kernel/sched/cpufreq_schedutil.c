@@ -128,6 +128,15 @@ static void sugov_deferred_update(struct sugov_policy *sg_policy, u64 time,
 	}
 }
 
+static inline int get_opp_count(struct cpufreq_policy *policy)
+{
+	int opp_nr;
+	struct cpufreq_frequency_table *freq_pos;
+
+	cpufreq_for_each_entry_idx(freq_pos, policy->freq_table, opp_nr);
+	return opp_nr;
+}
+
 /**
  * get_next_freq - Compute a new frequency for a given cpufreq policy.
  * @sg_policy: schedutil policy object to compute the new frequency for.
@@ -492,7 +501,8 @@ static unsigned int sugov_get_final_freq(struct sugov_cpu *sg_cpu, struct sugov_
 	opp = cpufreq_frequency_table_get_index(sg_policy->policy, next_freq);
 	if (opp < 0)
 		return next_freq;
-	for (; opp >= 0; opp--) {
+	for (; opp <= sg_policy->len - 1; opp++) {
+		opp_freq = sg_policy->policy->freq_table[opp].frequency;
 		opp_volt = freq_to_voltage(curr_cid, opp_freq);
 		if (lowest_volt_diff >= abs(opp_volt - cobuck_volt)) {
 			lowest_volt_diff = abs(opp_volt - cobuck_volt);
@@ -953,6 +963,8 @@ static int sugov_init(struct cpufreq_policy *policy)
 	first_cpu = cpumask_first(policy->related_cpus);
 	cluster_id = topology_physical_package_id(first_cpu);
 
+	sg_policy->len = get_opp_count(policy);
+
 	ret = sugov_kthread_create(sg_policy);
 	if (ret)
 		goto free_sg_policy;
@@ -977,7 +989,7 @@ static int sugov_init(struct cpufreq_policy *policy)
 		goto stop_kthread;
 	}
 
-	tunables->cobuck_enable = 0;
+	tunables->cobuck_enable = 1;
 
 	tunables->rate_limit_us = cpufreq_policy_transition_delay_us(policy);
 #ifdef CONFIG_OPLUS_UAG_AMU_AWARE
