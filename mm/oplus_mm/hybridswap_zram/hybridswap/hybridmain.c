@@ -363,15 +363,12 @@ static void unregister_all_hook(void)
 
 unsigned long memcg_anon_pages(struct mem_cgroup *memcg)
 {
-#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 10, 0)
 	struct lruvec *lruvec = NULL;
 	struct mem_cgroup_per_node *mz = NULL;
-#endif
 	if (!memcg)
 		return 0;
 
-#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 10, 0)
-	mz = mem_cgroup_nodeinfo(memcg, 0);
+	mz = memcg->nodeinfo[0];
 	if (!mz)
 		return 0;
 
@@ -379,31 +376,19 @@ unsigned long memcg_anon_pages(struct mem_cgroup *memcg)
 	if (!lruvec)
 		return 0;
 
-#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 4, 0)
-	return (mem_cgroup_get_lru_size(lruvec, LRU_ACTIVE_ANON) +
-			mem_cgroup_get_lru_size(lruvec, LRU_INACTIVE_ANON));
-#else
 	return (lruvec_page_state(lruvec, NR_ACTIVE_ANON) +
 			lruvec_page_state(lruvec, NR_INACTIVE_ANON));
-#endif
-#else
-	return (memcg_page_state_local(memcg, NR_ACTIVE_ANON) +
-			memcg_page_state_local(memcg, NR_INACTIVE_ANON));
-#endif
 }
 
 static unsigned long memcg_inactive_anon_pages(struct mem_cgroup *memcg)
 {
-#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 10, 0)
 	struct lruvec *lruvec = NULL;
 	struct mem_cgroup_per_node *mz = NULL;
-#endif
 
 	if (!memcg)
 		return 0;
 
-#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 10, 0)
-	mz = mem_cgroup_nodeinfo(memcg, 0);
+	mz = memcg->nodeinfo[0];
 	if (!mz)
 		return 0;
 
@@ -411,14 +396,7 @@ static unsigned long memcg_inactive_anon_pages(struct mem_cgroup *memcg)
 	if (!lruvec)
 		return 0;
 
-#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 4, 0)
-	return mem_cgroup_get_lru_size(lruvec, LRU_INACTIVE_ANON);
-#else
 	return lruvec_page_state(lruvec, NR_INACTIVE_ANON);
-#endif
-#else
-	return memcg_page_state_local(memcg, NR_INACTIVE_ANON);
-#endif
 }
 
 static ssize_t mem_cgroup_force_shrink_anon(struct kernfs_open_file *of,

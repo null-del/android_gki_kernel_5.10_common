@@ -13,40 +13,33 @@
 #include <linux/sched/cpufreq.h>
 #include <trace/events/power.h>
 #include <trace/hooks/sched.h>
+#if IS_ENABLED(CONFIG_OPLUS_FEATURE_SUGOV_POWER_EFFIENCY)
+#include <linux/cpufreq_effiency.h>
+#endif
 
-#define IOWAIT_BOOST_MIN	(SCHED_CAPACITY_SCALE / 8)
+#if IS_ENABLED(CONFIG_OPLUS_FEATURE_OCH)
+#include <linux/cpufreq_health.h>
+#endif
 
-struct sugov_tunables {
-	struct gov_attr_set	attr_set;
-	unsigned int		rate_limit_us;
-};
+#include "cpufreq_schedutil.h"
 
-struct sugov_policy {
-	struct cpufreq_policy	*policy;
+#ifdef CONFIG_OPLUS_UAG_AMU_AWARE
+#include "stall_util_cal.h"
+#endif
 
-	struct sugov_tunables	*tunables;
-	struct list_head	tunables_hook;
-
-	raw_spinlock_t		update_lock;	/* For shared policies */
-	u64			last_freq_update_time;
-	s64			freq_update_delay_ns;
-	unsigned int		next_freq;
-	unsigned int		cached_raw_freq;
-
-	/* The next fields are only needed if fast switch cannot be used: */
-	struct			irq_work irq_work;
-	struct			kthread_work work;
-	struct			mutex work_lock;
-	struct			kthread_worker worker;
-	struct task_struct	*thread;
-	bool			work_in_progress;
-
-	bool			limits_changed;
-	bool			need_freq_update;
-};
+struct proc_dir_entry *dir;
 
 struct sugov_cpu {
 	struct update_util_data	update_util;
+
+	unsigned int		prev_frame_loading;     /* prev frame idle time percentage */
+	u64			enter_idle;             /* cpu latest enter idle timestamp */
+	u64			prev_enter_ilde;        /* cpu last time enter idle timestamp */
+	u64			exit_idle;              /* cpu latest exit idle timestamp */
+	u64			prev_exit_idle;         /* cpu last time exit idle timestamp */
+	u64			idle_duration;          /* cpu current frame window in idle state time */
+	u64			prev_idle_duration;     /* cpu prev frame window in idle state time */
+
 	struct sugov_policy	*sg_policy;
 	unsigned int		cpu;
 
@@ -135,6 +128,15 @@ static void sugov_deferred_update(struct sugov_policy *sg_policy, u64 time,
 	}
 }
 
+static inline int get_opp_count(struct cpufreq_policy *policy)
+{
+	int opp_nr;
+	struct cpufreq_frequency_table *freq_pos;
+
+	cpufreq_for_each_entry_idx(freq_pos, policy->freq_table, opp_nr);
+	return opp_nr;
+}
+
 /**
  * get_next_freq - Compute a new frequency for a given cpufreq policy.
  * @sg_policy: schedutil policy object to compute the new frequency for.
@@ -169,14 +171,17 @@ static unsigned int get_next_freq(struct sugov_policy *sg_policy,
 			&sg_policy->need_freq_update);
 	if (next_freq)
 		freq = next_freq;
-	else
+	else {
 		freq = map_util_freq(util, freq, max);
 
-	if (freq == sg_policy->cached_raw_freq && !sg_policy->need_freq_update)
-		return sg_policy->next_freq;
+		if (freq == sg_policy->cached_raw_freq && !sg_policy->need_freq_update)
+			return sg_policy->next_freq;
 
-	sg_policy->cached_raw_freq = freq;
-	return cpufreq_driver_resolve_freq(policy, freq);
+		sg_policy->cached_raw_freq = freq;
+		freq = cpufreq_driver_resolve_freq(policy, freq);
+	}
+
+	return freq;
 }
 
 /*
@@ -294,6 +299,10 @@ static unsigned long sugov_get_util(struct sugov_cpu *sg_cpu)
 
 	sg_cpu->max = max;
 	sg_cpu->bw_dl = cpu_bw_dl(rq);
+
+#ifdef CONFIG_OPLUS_UAG_AMU_AWARE
+	uag_adjust_util(sg_cpu->cpu, &util, sg_cpu->sg_policy);
+#endif
 
 	return schedutil_cpu_util(sg_cpu->cpu, util, max, FREQUENCY_UTIL, NULL);
 }
@@ -444,6 +453,89 @@ static inline void ignore_dl_rate_limit(struct sugov_cpu *sg_cpu, struct sugov_p
 		sg_policy->limits_changed = true;
 }
 
+static unsigned int sugov_get_final_freq(struct sugov_cpu *sg_cpu, struct sugov_policy *sg_policy,
+					unsigned int next_freq)
+{
+	struct cpufreq_policy cobuck_policy;
+	struct sugov_policy *cobuck_sg_policy;
+	unsigned int cobuck_volt, cobuck_cid, cobuck_first_cpu;
+	unsigned int curr_first_cpu, curr_cid, curr_volt, opp_freq, opp_volt;
+	unsigned int lowest_volt_diff = 0;
+	unsigned int final_freq = next_freq;
+	int cobuck_cpu, opp;
+
+	if (!sg_policy->tunables->cobuck_enable)
+		return next_freq;
+
+	if (sg_policy->policy->cpu == 7)
+		cobuck_cpu = 4;
+	else if (sg_policy->policy->cpu == 4)
+		cobuck_cpu = 7;
+	else
+		cobuck_cpu = -1;
+
+	if (cobuck_cpu == -1)
+		return next_freq;
+
+	/* get cobuck cpu current freq and volt*/
+	if (cpufreq_get_policy(&cobuck_policy, cobuck_cpu))
+		return next_freq;
+
+	if (strcmp(cobuck_policy.governor->name, "schedutil"))
+		return next_freq;
+
+	cobuck_sg_policy = cobuck_policy.governor_data;
+
+	if (!cobuck_sg_policy)
+		return next_freq;
+
+	cobuck_first_cpu = cpumask_first(cobuck_policy.related_cpus);
+	cobuck_cid = topology_physical_package_id(cobuck_first_cpu);
+	cobuck_volt = freq_to_voltage(cobuck_cid, cobuck_policy.cur);
+
+	curr_first_cpu = cpumask_first(sg_policy->policy->related_cpus);
+	curr_cid = topology_physical_package_id(curr_first_cpu);
+	curr_volt = freq_to_voltage(curr_cid, next_freq);
+
+	lowest_volt_diff = abs(curr_volt - cobuck_volt);
+	opp = cpufreq_frequency_table_get_index(sg_policy->policy, next_freq);
+	if (opp < 0)
+		return next_freq;
+	for (; opp <= sg_policy->len - 1; opp++) {
+		opp_freq = sg_policy->policy->freq_table[opp].frequency;
+		opp_volt = freq_to_voltage(curr_cid, opp_freq);
+		if (lowest_volt_diff >= abs(opp_volt - cobuck_volt)) {
+			lowest_volt_diff = abs(opp_volt - cobuck_volt);
+			final_freq = opp_freq;
+		}
+	}
+	if (final_freq <= next_freq) {
+		sg_policy->cobuck_boosted = 0;
+		return next_freq;
+	} else if (cobuck_sg_policy->cobuck_boosted) {
+		sg_policy->cobuck_boosted = 0;
+		return next_freq;
+	} else
+		sg_policy->cobuck_boosted = 1;
+
+	return final_freq;
+}
+
+#ifdef CONFIG_OPLUS_MULTI_LV_TL
+static inline unsigned long uag_multi_util_max(struct sugov_policy *sg_policy)
+{
+	unsigned long max = 0;
+	int i;
+
+	for (i = 0; i < UA_UTIL_SIZE; i++) {
+		if (max < sg_policy->multi_util[i])
+			max = sg_policy->multi_util[i];
+	}
+
+	return max;
+}
+#endif
+
 static void sugov_update_single(struct update_util_data *hook, u64 time,
 				unsigned int flags)
 {
@@ -461,6 +553,10 @@ static void sugov_update_single(struct update_util_data *hook, u64 time,
 	if (!sugov_should_update_freq(sg_policy, time))
 		return;
 
+#ifdef CONFIG_OPLUS_UAG_AMU_AWARE
+	uag_update_counter(sg_policy);
+#endif
+
 	util = sugov_get_util(sg_cpu);
 	max = sg_cpu->max;
 	util = sugov_iowait_apply(sg_cpu, time, util, max);
@@ -475,6 +571,9 @@ static void sugov_update_single(struct update_util_data *hook, u64 time,
 		/* Restore cached freq as next_freq has changed */
 		sg_policy->cached_raw_freq = cached_freq;
 	}
+
+	/*cobuck check*/
+	next_f = sugov_get_final_freq(sg_cpu, sg_policy, next_f);
 
 	/*
 	 * This code runs under rq->lock for the target CPU, so it won't run
@@ -529,7 +628,13 @@ sugov_update_shared(struct update_util_data *hook, u64 time, unsigned int flags)
 	ignore_dl_rate_limit(sg_cpu, sg_policy);
 
 	if (sugov_should_update_freq(sg_policy, time)) {
+#ifdef CONFIG_OPLUS_UAG_AMU_AWARE
+		uag_update_counter(sg_policy);
+#endif
 		next_f = sugov_next_freq_shared(sg_cpu, time);
+
+		/*cobuck check*/
+		next_f = sugov_get_final_freq(sg_cpu, sg_policy, next_f);
 
 		if (sg_policy->policy->fast_switch_enabled)
 			sugov_fast_switch(sg_policy, time, next_f);
@@ -610,10 +715,103 @@ rate_limit_us_store(struct gov_attr_set *attr_set, const char *buf, size_t count
 	return count;
 }
 
+static ssize_t cobuck_enable_show(struct gov_attr_set *attr_set, char *buf)
+{
+	struct sugov_tunables *tunables = to_sugov_tunables(attr_set);
+
+	return scnprintf(buf, PAGE_SIZE, "%u\n", tunables->cobuck_enable);
+}
+
+static ssize_t cobuck_enable_store(struct gov_attr_set *attr_set, const char *buf,
+				   size_t count)
+{
+	struct sugov_tunables *tunables = to_sugov_tunables(attr_set);
+
+	if (kstrtobool(buf, &tunables->cobuck_enable))
+		return -EINVAL;
+
+	return count;
+}
+
+#ifdef CONFIG_OPLUS_UAG_AMU_AWARE
+static ssize_t stall_aware_show(struct gov_attr_set *attr_set, char *buf)
+{
+	struct sugov_tunables *tunables = to_sugov_tunables(attr_set);
+
+	return sprintf(buf, "%d\n", tunables->stall_aware);
+}
+
+static ssize_t
+stall_aware_store(struct gov_attr_set *attr_set, const char *buf, size_t count)
+{
+	struct sugov_tunables *tunables = to_sugov_tunables(attr_set);
+	unsigned int stall_aware;
+
+	if (kstrtouint(buf, 10, &stall_aware))
+		return -EINVAL;
+
+	tunables->stall_aware = stall_aware;
+	return count;
+}
+
+static ssize_t stall_reduce_pct_show(struct gov_attr_set *attr_set, char *buf)
+{
+	struct sugov_tunables *tunables = to_sugov_tunables(attr_set);
+
+	return sprintf(buf, "%llu\n", tunables->stall_reduce_pct);
+}
+
+static ssize_t
+stall_reduce_pct_store(struct gov_attr_set *attr_set, const char *buf, size_t count)
+{
+	struct sugov_tunables *tunables = to_sugov_tunables(attr_set);
+	int stall_reduce_pct;
+
+	if (kstrtouint(buf, 10, &stall_reduce_pct))
+		return -EINVAL;
+
+	tunables->stall_reduce_pct = stall_reduce_pct;
+	return count;
+}
+
+static ssize_t report_policy_show(struct gov_attr_set *attr_set, char *buf)
+{
+	struct sugov_tunables *tunables = to_sugov_tunables(attr_set);
+
+	return sprintf(buf, "%d\n", tunables->report_policy);
+}
+
+static ssize_t
+report_policy_store(struct gov_attr_set *attr_set, const char *buf, size_t count)
+{
+	struct sugov_tunables *tunables = to_sugov_tunables(attr_set);
+	int report_policy;
+
+	if (kstrtoint(buf, 10, &report_policy))
+		return -EINVAL;
+
+	tunables->report_policy = report_policy;
+	return count;
+}
+#endif /* CONFIG_OPLUS_UAG_AMU_AWARE */
+
 static struct governor_attr rate_limit_us = __ATTR_RW(rate_limit_us);
+static struct governor_attr cobuck_enable = __ATTR_RW(cobuck_enable);
+
+#ifdef CONFIG_OPLUS_UAG_AMU_AWARE
+static struct governor_attr stall_aware = __ATTR_RW(stall_aware);
+static struct governor_attr stall_reduce_pct = __ATTR_RW(stall_reduce_pct);
+static struct governor_attr report_policy = __ATTR_RW(report_policy);
+#endif
 
 static struct attribute *sugov_attrs[] = {
 	&rate_limit_us.attr,
+#ifdef CONFIG_OPLUS_UAG_AMU_AWARE
+	&stall_aware.attr,
+	&stall_reduce_pct.attr,
+	&report_policy.attr,
+#endif
+	&cobuck_enable.attr,
 	NULL
 };
 ATTRIBUTE_GROUPS(sugov);
@@ -739,10 +937,20 @@ static int sugov_init(struct cpufreq_policy *policy)
 	struct sugov_policy *sg_policy;
 	struct sugov_tunables *tunables;
 	int ret = 0;
+	int cluster_id, first_cpu;
 
 	/* State should be equivalent to EXIT */
 	if (policy->governor_data)
 		return -EBUSY;
+
+#if IS_ENABLED(CONFIG_OPLUS_FEATURE_OCH)
+	if(cpufreq_health_register(policy))
+		pr_err("cpufreq health init failed!\n");
+#endif
+
+#if IS_ENABLED(CONFIG_OPLUS_FEATURE_SUGOV_POWER_EFFIENCY)
+	frequence_opp_init(policy);
+#endif
 
 	cpufreq_enable_fast_switch(policy);
 
@@ -751,6 +959,11 @@ static int sugov_init(struct cpufreq_policy *policy)
 		ret = -ENOMEM;
 		goto disable_fast_switch;
 	}
+
+	first_cpu = cpumask_first(policy->related_cpus);
+	cluster_id = topology_physical_package_id(first_cpu);
+
+	sg_policy->len = get_opp_count(policy);
 
 	ret = sugov_kthread_create(sg_policy);
 	if (ret)
@@ -776,7 +989,15 @@ static int sugov_init(struct cpufreq_policy *policy)
 		goto stop_kthread;
 	}
 
+	tunables->cobuck_enable = 1;
+
 	tunables->rate_limit_us = cpufreq_policy_transition_delay_us(policy);
+#ifdef CONFIG_OPLUS_UAG_AMU_AWARE
+	/* init stall cal */
+	tunables->stall_aware = 1;
+	tunables->stall_reduce_pct = 70;
+	tunables->report_policy = REPORT_REDUCE_STALL;
+#endif
 
 	policy->governor_data = sg_policy;
 	sg_policy->tunables = tunables;
@@ -852,6 +1073,10 @@ static int sugov_start(struct cpufreq_policy *policy)
 		sg_cpu->sg_policy		= sg_policy;
 	}
 
+#ifdef CONFIG_OPLUS_UAG_AMU_AWARE
+	uag_register_stall_update();
+#endif
+
 	for_each_cpu(cpu, policy->cpus) {
 		struct sugov_cpu *sg_cpu = &per_cpu(sugov_cpu, cpu);
 
@@ -870,6 +1095,10 @@ static void sugov_stop(struct cpufreq_policy *policy)
 
 	for_each_cpu(cpu, policy->cpus)
 		cpufreq_remove_update_util_hook(cpu);
+
+#ifdef CONFIG_OPLUS_UAG_AMU_AWARE
+	uag_unregister_stall_update();
+#endif
 
 	synchronize_rcu();
 
@@ -909,5 +1138,15 @@ struct cpufreq_governor *cpufreq_default_governor(void)
 	return &schedutil_gov;
 }
 #endif
+
+static int __init cpufreq_uag_init(void)
+{
+	int ret = 0;
+
+	dir = proc_mkdir("schedutil", NULL);
+
+	return ret;
+}
+module_init(cpufreq_uag_init);
 
 cpufreq_governor_init(schedutil_gov);

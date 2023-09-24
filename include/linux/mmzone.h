@@ -118,8 +118,7 @@ static inline bool free_area_empty(struct free_area *area, int migratetype)
 struct pglist_data;
 
 /*
- * zone->lock and the zone lru_lock are two of the hottest locks in the kernel.
- * So add a wild amount of padding here to ensure that they fall into separate
+ * Add a wild amount of padding here to ensure datas fall into separate
  * cachelines.  There are very few zone structures in the machine, so space
  * consumption is not a concern here.
  */
@@ -485,6 +484,8 @@ static inline void lru_gen_exit_memcg(struct mem_cgroup *memcg)
 
 struct lruvec {
 	struct list_head		lists[NR_LRU_LISTS];
+	/* per lruvec lru_lock for memcg */
+	spinlock_t			lru_lock;
 	/*
 	 * These track the cost of reclaiming one LRU - file or anon -
 	 * over the other. As the observed cost of reclaiming one LRU
@@ -1014,7 +1015,6 @@ typedef struct pglist_data {
 
 	/* Write-intensive fields used by page reclaim */
 	ZONE_PADDING(_pad1_)
-	spinlock_t		lru_lock;
 
 #ifdef CONFIG_DEFERRED_STRUCT_PAGE_INIT
 	/*

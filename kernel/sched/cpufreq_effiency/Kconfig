@@ -1,0 +1,28 @@
+config OPLUS_FEATURE_SUGOV_POWER_EFFIENCY
+	tristate "power domain effiency"
+	default y
+	help
+	     Select Left or right frequence point as target frequence base on powerdomain and currenct frequence value
+
+config OPLUS_UAG_AMU_AWARE
+	bool "consider amu info for cpufreq decision"
+	default y
+	help
+	  Consider AMU info such as cycles/stall ... to adjust cpufreq.
+
+config OPLUS_FEATURE_OCH
+	tristate "cpufreq_health"
+	default y
+	help
+		This selects cpufreq and vlotage statistics driver
+
+config UAG_NONLINEAR_FREQ_CTL
+	bool "Non-linear frequency control"
+	default y
+	help
+	  Choose this option to enable non-linear frequency control.
+	  This will change per-opp capacity from linear scaled by
+	  freuqency to evaluated by benchmark. This makes capacity
+	  more accurate and will let scheduler/schedutil use more
+	  suitable frequency.
+
